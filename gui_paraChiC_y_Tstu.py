@@ -8,7 +8,6 @@ import numpy as np
 from scipy import stats
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -17,7 +16,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -41,11 +39,6 @@ except Exception:
     Figure = None
 
 from calculos.chi_cuadrado import calcular_ic_varianza
-from calculos.dataframe_finanzas import (
-    DependenciaDataFrameError,
-    calcular_ic_desde_muestra,
-    descargar_muestra_cotizaciones,
-)
 from calculos.t_student import calcular_ic_media
 
 
@@ -60,11 +53,8 @@ class AppEstadistica(QMainWindow):
         self.tipo_calculo = "media"
 
         self.confianza_input = QLineEdit("0.95")
-        self.ticker_input = QLineEdit("AAPL")
-        self.dias_dataframe_input = QLineEdit("120")
         self.texto_muestra = QPlainTextEdit("70, 47, 42, 51, 56, 71, 75, 61, 62")
 
-        self.estado_tipo_label: QLabel | None = None
         self.label_contador: QLabel | None = None
         self.resultados_scroll: QScrollArea | None = None
         self.resultados_host: QWidget | None = None
@@ -77,6 +67,7 @@ class AppEstadistica(QMainWindow):
 
         self._aplicar_estilo()
         self._construir_interfaz()
+        self._actualizar_grafico_muestra(self.obtener_muestra())
 
     def _aplicar_estilo(self):
         self.setStyleSheet(
@@ -97,10 +88,6 @@ class AppEstadistica(QMainWindow):
             QLabel#Subtitulo,
             QLabel#Ayuda {
                 color: #6e6e73;
-            }
-            QLabel#TipoActual {
-                color: #0071e3;
-                font-weight: 600;
             }
             QLabel#Contador {
                 font-size: 42px;
@@ -165,9 +152,6 @@ class AppEstadistica(QMainWindow):
             QPushButton#Principal:hover {
                 background: #0077ed;
             }
-            QPushButton#Suave {
-                background: #f8f8fa;
-            }
             QRadioButton {
                 spacing: 8px;
                 min-height: 24px;
@@ -191,20 +175,6 @@ class AppEstadistica(QMainWindow):
             QSplitter::handle {
                 background: transparent;
                 width: 18px;
-            }
-            QMenu {
-                background: white;
-                border: 1px solid #d2d2d7;
-                border-radius: 8px;
-                padding: 6px;
-            }
-            QMenu::item {
-                padding: 8px 18px;
-                border-radius: 6px;
-            }
-            QMenu::item:selected {
-                background: #e8f2ff;
-                color: #1d1d1f;
             }
             """
         )
@@ -232,28 +202,11 @@ class AppEstadistica(QMainWindow):
         textos = QVBoxLayout()
         titulo = QLabel("Intervalos de confianza")
         titulo.setObjectName("Titulo")
-        subtitulo = QLabel("Muestra manual y cotizaciones reales para media, varianza y desvio.")
+        subtitulo = QLabel("Muestra manual para calcular intervalos de confianza de media, varianza y desvio.")
         subtitulo.setObjectName("Subtitulo")
         textos.addWidget(titulo)
         textos.addWidget(subtitulo)
         fila.addLayout(textos, stretch=1)
-
-        self.estado_tipo_label = QLabel(self._texto_tipo_seleccionado())
-        self.estado_tipo_label.setObjectName("TipoActual")
-        self.estado_tipo_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        fila.addWidget(self.estado_tipo_label)
-
-        selector = QPushButton("Cambiar calculo")
-        selector.setObjectName("Suave")
-        menu = QMenu(selector)
-        accion_media = QAction("IC de media (T de Student)", self)
-        accion_varianza = QAction("IC de varianza (Chi Cuadrado)", self)
-        accion_media.triggered.connect(lambda: self.seleccionar_tipo("media"))
-        accion_varianza.triggered.connect(lambda: self.seleccionar_tipo("varianza"))
-        menu.addAction(accion_media)
-        menu.addAction(accion_varianza)
-        selector.setMenu(menu)
-        fila.addWidget(selector)
 
         return fila
 
@@ -265,7 +218,6 @@ class AppEstadistica(QMainWindow):
 
         layout.addWidget(self._construir_caja_configuracion())
         layout.addWidget(self._construir_caja_muestra())
-        layout.addWidget(self._construir_caja_dataframe())
         layout.addLayout(self._construir_botones_accion())
         layout.addWidget(self._construir_caja_resultados(), stretch=1)
 
@@ -362,32 +314,6 @@ class AppEstadistica(QMainWindow):
 
         return caja
 
-    def _construir_caja_dataframe(self):
-        caja = QGroupBox("Calculo con DataFrame real")
-        caja.setMinimumHeight(125)
-        layout = QVBoxLayout(caja)
-        layout.setSpacing(10)
-
-        fila_inputs = QHBoxLayout()
-        fila_inputs.setSpacing(10)
-        fila_inputs.addWidget(QLabel("Ticker:"))
-        self.ticker_input.setMaximumWidth(140)
-        fila_inputs.addWidget(self.ticker_input)
-
-        fila_inputs.addWidget(QLabel("Cantidad de dias:"))
-        self.dias_dataframe_input.setMaximumWidth(100)
-        fila_inputs.addWidget(self.dias_dataframe_input)
-        fila_inputs.addStretch(1)
-        layout.addLayout(fila_inputs)
-
-        boton = QPushButton("Calcular con cotizaciones")
-        boton.setObjectName("Principal")
-        boton.setMinimumWidth(220)
-        boton.clicked.connect(self.calcular_con_dataframe)
-        layout.addWidget(boton, alignment=Qt.AlignmentFlag.AlignLeft)
-
-        return caja
-
     def _construir_botones_accion(self):
         fila = QHBoxLayout()
         fila.setSpacing(10)
@@ -460,13 +386,6 @@ class AppEstadistica(QMainWindow):
             self.radio_media.setChecked(True)
         if tipo == "varianza" and not self.radio_varianza.isChecked():
             self.radio_varianza.setChecked(True)
-        if self.estado_tipo_label is not None:
-            self.estado_tipo_label.setText(self._texto_tipo_seleccionado())
-
-    def _texto_tipo_seleccionado(self):
-        if self.tipo_calculo == "media":
-            return "Seleccion actual: T de Student"
-        return "Seleccion actual: Chi Cuadrado"
 
     def obtener_muestra(self):
         contenido = self.texto_muestra.toPlainText().strip()
@@ -494,19 +413,6 @@ class AppEstadistica(QMainWindow):
 
         return confianza
 
-    def obtener_dias_dataframe(self):
-        try:
-            dias = int(self.dias_dataframe_input.text().strip())
-        except ValueError as exc:
-            raise ValueError("La cantidad de dias debe ser un entero.") from exc
-
-        if dias < 2:
-            raise ValueError("La cantidad de dias debe ser mayor o igual a 2.")
-        if dias > 2000:
-            raise ValueError("Por ahora se permite como maximo 2000 dias.")
-
-        return dias
-
     def calcular(self):
         try:
             muestra = self.obtener_muestra()
@@ -518,28 +424,8 @@ class AppEstadistica(QMainWindow):
                 resultado_obj = calcular_ic_varianza(muestra, confianza)
                 self._mostrar_resultado_varianza(muestra, resultado_obj)
 
+            self._actualizar_grafico_muestra(muestra)
             self._incrementar_contador()
-        except Exception as exc:
-            self._mostrar_error("Error", str(exc))
-
-    def calcular_con_dataframe(self):
-        try:
-            ticker = self.ticker_input.text().strip().upper()
-            dias = self.obtener_dias_dataframe()
-            confianza = self.obtener_confianza()
-
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            try:
-                muestra_df = descargar_muestra_cotizaciones(ticker=ticker, dias=dias, columna="Close")
-                resultado_df = calcular_ic_desde_muestra(muestra_df.valores, confianza)
-            finally:
-                QApplication.restoreOverrideCursor()
-
-            self._mostrar_resultado_dataframe(muestra_df, resultado_df)
-            self._actualizar_grafico_distribucion(muestra_df)
-            self._incrementar_contador()
-        except DependenciaDataFrameError as exc:
-            self._mostrar_error("Dependencias faltantes", str(exc))
         except Exception as exc:
             self._mostrar_error("Error", str(exc))
 
@@ -552,11 +438,13 @@ class AppEstadistica(QMainWindow):
         self.seleccionar_tipo("media")
         self.confianza_input.setText("0.95")
         self.texto_muestra.setPlainText("12, 15, 14, 10, 13, 16, 11")
+        self._actualizar_grafico_muestra(self.obtener_muestra())
 
     def cargar_ejemplo_varianza(self):
         self.seleccionar_tipo("varianza")
         self.confianza_input.setText("0.95")
         self.texto_muestra.setPlainText("70, 47, 42, 51, 56, 71, 75, 61, 62")
+        self._actualizar_grafico_muestra(self.obtener_muestra())
 
     def reiniciar_contador(self):
         self.contador_ejercicios = 0
@@ -786,41 +674,6 @@ class AppEstadistica(QMainWindow):
             f"IC para sigma = ({resultado.ic_desv_inf:.6f}, {resultado.ic_desv_sup:.6f})",
         )
 
-    def _mostrar_resultado_dataframe(self, muestra_df, resultado_df):
-        bloques = [
-            ("titulo", "Estimacion con cotizaciones reales"),
-            ("texto", f"Ticker: {muestra_df.ticker} | Columna: {muestra_df.columna}"),
-            ("texto", f"Rango: {muestra_df.fecha_inicio} a {muestra_df.fecha_fin} | Observaciones: {resultado_df.n}"),
-            ("espacio", ""),
-            ("subtitulo", "Estimadores"),
-            ("math", rf"$n = {resultado_df.n},\quad \nu = {resultado_df.gl},\quad \alpha = {resultado_df.alpha:.4f}$"),
-            (
-                "math",
-                rf"$\hat{{\mu}} = {resultado_df.media:.6f},\quad \hat{{\sigma}}^2 = "
-                rf"{resultado_df.varianza:.6f},\quad \hat{{\sigma}} = {resultado_df.desvio:.6f}$",
-            ),
-            ("espacio", ""),
-            ("subtitulo", "Intervalos de confianza"),
-            (
-                "resultado",
-                rf"$IC_{{\mu}} = \left({resultado_df.ic_media_inf:.6f},\; {resultado_df.ic_media_sup:.6f}\right)$",
-            ),
-            (
-                "resultado",
-                rf"$IC_{{\sigma^2}} = \left({resultado_df.ic_var_inf:.6f},\; {resultado_df.ic_var_sup:.6f}\right)$",
-            ),
-            (
-                "resultado",
-                rf"$IC_{{\sigma}} = \left({resultado_df.ic_desv_inf:.6f},\; {resultado_df.ic_desv_sup:.6f}\right)$",
-            ),
-        ]
-        self._renderizar_resultado_matematico(
-            bloques,
-            f"IC(mu)=({resultado_df.ic_media_inf:.6f}, {resultado_df.ic_media_sup:.6f})\n"
-            f"IC(sigma^2)=({resultado_df.ic_var_inf:.6f}, {resultado_df.ic_var_sup:.6f})\n"
-            f"IC(sigma)=({resultado_df.ic_desv_inf:.6f}, {resultado_df.ic_desv_sup:.6f})",
-        )
-
     def _dibujar_grafico_vacio(self):
         if self.canvas_grafico is None or self.ax_serie is None or self.ax_hist is None or self.fig is None:
             return
@@ -828,31 +681,31 @@ class AppEstadistica(QMainWindow):
         self.ax_serie.clear()
         self.ax_hist.clear()
 
-        self.ax_serie.set_title("Serie temporal")
-        self.ax_serie.text(0.5, 0.5, "Sin datos descargados", ha="center", va="center", transform=self.ax_serie.transAxes)
+        self.ax_serie.set_title("Serie de la muestra")
+        self.ax_serie.text(0.5, 0.5, "Sin muestra calculada", ha="center", va="center", transform=self.ax_serie.transAxes)
         self.ax_serie.set_xticks([])
         self.ax_serie.set_yticks([])
 
-        self.ax_hist.set_title("Histograma")
-        self.ax_hist.text(0.5, 0.5, "Sin datos descargados", ha="center", va="center", transform=self.ax_hist.transAxes)
+        self.ax_hist.set_title("Histograma de la muestra")
+        self.ax_hist.text(0.5, 0.5, "Sin muestra calculada", ha="center", va="center", transform=self.ax_hist.transAxes)
         self.ax_hist.set_xticks([])
         self.ax_hist.set_yticks([])
 
         self.fig.tight_layout(pad=1.3)
         self.canvas_grafico.draw_idle()
 
-    def _actualizar_grafico_distribucion(self, muestra):
+    def _actualizar_grafico_muestra(self, muestra):
         if self.canvas_grafico is None or self.ax_serie is None or self.ax_hist is None or self.fig is None:
             return
 
-        valores = np.array(muestra.valores, dtype=float)
+        valores = np.array(muestra, dtype=float)
         x = np.arange(1, len(valores) + 1)
 
         self.ax_serie.clear()
         self.ax_serie.plot(x, valores, color="#0071e3", marker="o", linewidth=1.8, markersize=3.5)
-        self.ax_serie.set_title(f"{muestra.ticker}: {muestra.fecha_inicio} a {muestra.fecha_fin}")
+        self.ax_serie.set_title(f"Serie de observaciones (n={len(valores)})")
         self.ax_serie.set_xlabel("Observacion")
-        self.ax_serie.set_ylabel("Cierre")
+        self.ax_serie.set_ylabel("Valor")
         self.ax_serie.grid(alpha=0.2)
 
         self.ax_hist.clear()
@@ -866,8 +719,8 @@ class AppEstadistica(QMainWindow):
             self.ax_hist.plot(x_pdf, y_pdf, color="#ff3b30", linewidth=2, label="Normal ajustada")
             self.ax_hist.legend(loc="best", fontsize=8)
 
-        self.ax_hist.set_title("Distribucion de precios")
-        self.ax_hist.set_xlabel("Precio de cierre")
+        self.ax_hist.set_title("Histograma de la muestra")
+        self.ax_hist.set_xlabel("Valor")
         self.ax_hist.set_ylabel("Densidad")
         self.ax_hist.grid(alpha=0.2)
 
