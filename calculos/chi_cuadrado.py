@@ -4,6 +4,8 @@ from typing import Sequence
 
 from scipy import stats
 
+from calculos.validaciones import normalizar_muestra, validar_confianza
+
 
 @dataclass(frozen=True)
 class ResultadoICVarianza:
@@ -24,11 +26,14 @@ class ResultadoICVarianza:
 
 
 def calcular_ic_varianza(muestra: Sequence[float], confianza: float) -> ResultadoICVarianza:
-    n = len(muestra)
+    valores = normalizar_muestra(muestra)
+    confianza = validar_confianza(confianza)
+
+    n = len(valores)
     gl = n - 1
-    media = stats.tmean(muestra)
-    desvio = stats.tstd(muestra)
-    varianza_muestral = stats.tvar(muestra)
+    media = stats.tmean(valores)
+    desvio = stats.tstd(valores)
+    varianza_muestral = stats.tvar(valores)
     alpha = 1 - confianza
 
     chi2_izq = stats.chi2.ppf(alpha / 2, df=gl)
@@ -40,7 +45,7 @@ def calcular_ic_varianza(muestra: Sequence[float], confianza: float) -> Resultad
     ic_desv_sup = math.sqrt(ic_var_sup)
 
     return ResultadoICVarianza(
-        muestra=list(muestra),
+        muestra=valores,
         n=n,
         gl=gl,
         media=media,
@@ -84,4 +89,3 @@ def formatear_resultado_ic_varianza(resultado: ResultadoICVarianza) -> str:
     texto.append(f"IC para sigma = ({resultado.ic_desv_inf:.6f}, {resultado.ic_desv_sup:.6f})")
 
     return "\n".join(texto)
-

@@ -4,6 +4,8 @@ from typing import Sequence
 
 from scipy import stats
 
+from calculos.validaciones import normalizar_muestra, validar_confianza
+
 
 @dataclass(frozen=True)
 class ResultadoICMedia:
@@ -21,10 +23,13 @@ class ResultadoICMedia:
 
 
 def calcular_ic_media(muestra: Sequence[float], confianza: float) -> ResultadoICMedia:
-    n = len(muestra)
+    valores = normalizar_muestra(muestra)
+    confianza = validar_confianza(confianza)
+
+    n = len(valores)
     gl = n - 1
-    media = stats.tmean(muestra)
-    desvio = stats.tstd(muestra)
+    media = stats.tmean(valores)
+    desvio = stats.tstd(valores)
     alpha = 1 - confianza
     t_critico = stats.t.ppf(1 - alpha / 2, gl)
 
@@ -33,7 +38,7 @@ def calcular_ic_media(muestra: Sequence[float], confianza: float) -> ResultadoIC
     ic_sup = media + t_critico * error_estandar
 
     return ResultadoICMedia(
-        muestra=list(muestra),
+        muestra=valores,
         n=n,
         gl=gl,
         media=media,
@@ -73,4 +78,3 @@ def formatear_resultado_ic_media(resultado: ResultadoICMedia) -> str:
     texto.append(f"IC para mu = ({resultado.ic_inf:.6f}, {resultado.ic_sup:.6f})")
 
     return "\n".join(texto)
-
